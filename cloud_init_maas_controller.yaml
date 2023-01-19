@@ -5,31 +5,11 @@ chpasswd:
     ubuntu:ubuntu
   expire: false
 
-write_files:
-  - path: /etc/netplan/50-cloud-init.yaml
-    owner: root:root
-    permissions: '0644'
-    content: |
-      network:
-        version: 2
-        ethernets:
-          enp1s0:
-              dhcp4: true
-              match:
-                  macaddress: '52:54:00:01:01:01'
-              set-name: enp1s0
-          enp2s0:
-              dhcp4: false
-              match:
-                  macaddress: '52:54:00:01:01:02'
-              set-name: enp2s0
-              addresses:
-                - 10.10.0.2/24
-
 package_upgrade: true
 
 packages:
-   - jq
+  - jq
+  - openssh-server
 
 runcmd:
   - snap install maas-test-db
@@ -41,6 +21,3 @@ runcmd:
   - ssh-keygen -q -N '' -f /var/snap/maas/current/root/.ssh/id_rsa
   - ssh-import-id lp:freyes
   - su - ubuntu -c "ssh-import-id lp:freyes"
-
-power_state:
-  mode: reboot
