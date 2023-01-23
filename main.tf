@@ -557,6 +557,10 @@ ipmitool -I lanplus -U admin -P password -H 10.0.0.1  -p $IPMI_PORT power status
 EOF
     when = create
   }
+  provisioner "local-exec" {
+    command = "rm -rf ~/.vbmc/baremetal${count.index + 1}"
+    when = destroy
+  }
 }
 
 resource "null_resource" "create_openstack_networks" {
