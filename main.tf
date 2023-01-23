@@ -490,6 +490,7 @@ resource "null_resource" "bundle" {
     null_resource.juju_bootstrap
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 juju add-model ironic
 juju add-space ironic 10.10.0.0/24
@@ -502,7 +503,9 @@ EOF
   }
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
+juju remove-machine --force 0 1 2 3
 juju destroy-model -y ironic || /bin/true
 EOF
     when = destroy
@@ -514,7 +517,7 @@ resource "null_resource" "setup_vbmc" {
     libvirt_domain.ironic_node,
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 mkdir -p ~/.config/systemd/user/
 cp ./virtualbmc.service ~/.config/systemd/user/virtualbmc.service
@@ -529,7 +532,7 @@ EOF
   }
 
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 systemctl --user stop virtualbmc || /bin/true
 rm ~/.config/systemd/user/virtualbmc.service
@@ -546,7 +549,7 @@ resource "null_resource" "configure_vbmc" {
     null_resource.setup_vbmc,
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 IPMI_PORT=623${count.index}
 vbmc add baremetal${count.index + 1} --port $IPMI_PORT
@@ -561,7 +564,7 @@ resource "null_resource" "create_openstack_networks" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 source novarc
 
@@ -594,7 +597,7 @@ resource "null_resource" "upload_images" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 source novarc
 
@@ -641,10 +644,8 @@ resource "null_resource" "create_openstack_flavors" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
-#!/bin/bash -x
-
 source novarc
 
 export RAM_MB=2048
@@ -667,9 +668,8 @@ resource "null_resource" "create_openstack_key" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
-#!/bin/bash -x
 source novarc
 openstack keypair create --public-key /home/ubuntu/.ssh/id_rsa.pub testkey
 EOF
@@ -682,7 +682,7 @@ resource "null_resource" "create_openstack_ironic_node" {
     null_resource.upload_images,
   ]
   provisioner "local-exec" {
-    interpreter = ["/bin/bash", "-x"]
+    interpreter = ["/bin/bash", "-x", "-c"]
     command = <<EOF
 source novarc
 
