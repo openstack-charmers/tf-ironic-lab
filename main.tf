@@ -496,7 +496,7 @@ resource "null_resource" "configure_vbmc" {
     null_resource.setup_vbmc,
   ]
   provisioner "local-exec" {
-    command = "vbmc add "baremetal${count.index + 1}" --port 623${count.index}"
+    command = "vbmc add baremetal${count.index + 1} --port 623${count.index}"
     when = create
   }
 }
