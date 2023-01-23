@@ -121,6 +121,20 @@ resource "libvirt_volume" "node_rootfs" {
   size = var.maas_nodes_rootfs_size
 }
 
+resource "libvirt_volume" "node_osd_1" {
+  count = var.num_maas_nodes
+  name = "node${count.index + 1}-osd_1.qcow2"
+  pool = "default"
+  size = 32212254720  # 30GiB
+}
+
+resource "libvirt_volume" "node_osd_2" {
+  count = var.num_maas_nodes
+  name = "node${count.index + 1}-osd_2.qcow2"
+  pool = "default"
+  size = 32212254720  # 30GiB
+}
+
 resource "libvirt_volume" "ironic_node_rootfs" {
   count = var.num_ironic_nodes
   name = "baremetal${count.index + 1}.qcow2"
@@ -331,6 +345,14 @@ resource "libvirt_domain" "node" {
 
   disk {
     volume_id = libvirt_volume.node_rootfs[count.index].id
+  }
+
+  disk {
+    volume_id = libvirt_volume.node_osd_1[count.index].id
+  }
+
+  disk {
+    volume_id = libvirt_volume.node_osd_2[count.index].id
   }
 
   console {
