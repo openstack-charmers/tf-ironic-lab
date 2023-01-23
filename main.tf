@@ -111,7 +111,7 @@ resource "libvirt_volume" "node_rootfs" {
 
 resource "libvirt_volume" "ironic_node_rootfs" {
   count = var.num_ironic_nodes
-  name = "ironic-node${count.index + 1}.qcow2"
+  name = "baremetal${count.index + 1}.qcow2"
   pool = "default"
   size = var.ironic_nodes_rootfs_size
 }
@@ -359,7 +359,7 @@ resource "libvirt_domain" "ironic_node" {
     libvirt_domain.maas_controller
   ]
   count = var.num_ironic_nodes
-  name   = "ironic-node${count.index + 1}"
+  name   = "baremetal${count.index + 1}"
   memory = "4096"
   vcpu   = 2
   running = false
@@ -370,7 +370,7 @@ resource "libvirt_domain" "ironic_node" {
 
   network_interface {
     network_id     = libvirt_network.ironic_network.id
-    hostname       = "ironic-node${count.index + 1}"
+    hostname       = "baremetal${count.index + 1}"
     mac            = "52:54:00:77:01:0${count.index + 1}"
     wait_for_lease = false
   }
@@ -427,7 +427,8 @@ resource "null_resource" "cloud_and_creds" {
 
 resource "null_resource" "juju_bootstrap" {
   depends_on = [
-    null_resource.cloud_and_creds
+    null_resource.cloud_and_creds,
+    libvirt_domain.juju_controller,
   ]
   provisioner "local-exec" {
     command = "until juju bootstrap --bootstrap-constraints tags=juju maas-one maas-one; do sleep 10 ; done"
@@ -459,5 +460,43 @@ EOF
 juju destroy-model -y ironic || /bin/true
 EOF
     when = destroy
+  }
+}
+
+resource "null_resource" "setup_vbmc" {
+  depends_on = [
+    null_resource.bundle,
+  ]
+  provisioner "file" {
+    source      = "virtualbmc.service"
+    destination = pathexpand("~/.config/systemd/user/virtualbmc.service")
+  }
+
+  provisioner "local-exec" {
+    command = <<EOF
+systemctl --user daemon-reload
+sudo apt install -y pipx python3-venv
+pipx ensurepath
+pipx install virtualbmc
+source ~/.bashrc
+systemctl --user restart virtualbmc.service
+EOF
+    when = create
+  }
+
+  provisioner "local-exec" {
+    command = "pipx uninstall virtualbmc"
+    when = destroy
+  }
+}
+
+resource "null_resource" "configure_vbmc" {
+  count = var.num_ironic_nodes
+  depends_on = [
+    null_resource.setup_vbmc,
+  ]
+  provisioner "local-exec" {
+    command = "vbmc add "baremetal${count.index + 1}" --port 623${count.index}"
+    when = create
   }
 }

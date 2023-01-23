@@ -1,0 +1,11 @@
+[Unit]
+Description=A virtual BMC for controlling virtual machines using IPMI commands
+After=network.target
+
+[Service]
+ExecStart=vbmcd --foreground
+Restart=always
+Type=simple
+
+[Install]
+WantedBy=default.target
