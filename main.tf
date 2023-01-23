@@ -541,7 +541,178 @@ resource "null_resource" "configure_vbmc" {
     null_resource.setup_vbmc,
   ]
   provisioner "local-exec" {
-    command = "vbmc add baremetal${count.index + 1} --port 623${count.index}"
+    command = <<EOF
+#!/bin/bash -ex
+IPMI_PORT=623${count.index}
+vbmc add baremetal${count.index + 1} --port $IPMI_PORT
+ipmitool -I lanplus -U admin -P password -H 10.0.0.1  -p $IPMI_PORT power status
+EOF
     when = create
+  }
+}
+
+resource "null_resource" "create_openstack_networks" {
+  depends_on = [
+    null_resource.bundle
+  ]
+  provisioner "local-exec" {
+    command = <<EOF
+#!/bin/bash -x
+
+source novarc
+
+openstack router create ironic-router
+openstack network create Pub_Net --external --share --default    --provider-network-type flat --provider-physical-network physnet1
+openstack subnet create Pub_Subnet --allocation-pool start=10.0.0.200,end=10.0.0.250 --subnet-range 10.0.0.0/24 --no-dhcp --gateway 10.0.0.1 --network Pub_Net
+openstack router set --external-gateway Pub_Net ironic-router
+openstack network create \
+     --share \
+     --provider-network-type flat \
+     --provider-physical-network physnet2 \
+     deployment
+
+# Set gateway to be router IP
+openstack subnet create \
+     --network deployment \
+     --dhcp \
+     --subnet-range 10.10.0.0/24 \
+     --gateway 10.10.0.1 \
+     --ip-version 4 \
+     --allocation-pool start=10.10.0.100,end=10.10.0.254 \
+     deployment
+
+openstack router add subnet ironic-router deployment
+EOF
+  }
+}
+resource "null_resource" "upload_images" {
+  depends_on = [
+    null_resource.bundle
+  ]
+  provisioner "local-exec" {
+    command = <<EOF
+#!/bin/bash
+
+source novarc
+
+if [[ ! -f ironic-python-agent.initramfs ]]; then
+    wget http://10.245.161.162/swift/v1/images/ironic-python-agent.initramfs
+fi
+if [[ ! -f ironic-python-agent.kernel ]]; then
+    wget http://10.245.161.162/swift/v1/images/ironic-python-agent.kernel
+fi
+if [[ ! -f baremetal-ubuntu-focal.img ]]; then
+    wget http://10.245.161.162/swift/v1/images/baremetal-ubuntu-focal.img
+fi
+
+for release in bionic focal
+do
+    glance image-create \
+        --store swift \
+        --name baremetal-$release \
+        --disk-format raw \
+        --container-format bare \
+        --file baremetal-ubuntu-$release.img --progress
+done
+
+glance image-create \
+    --store swift \
+    --name deploy-vmlinuz \
+    --disk-format aki \
+    --container-format aki \
+    --visibility public \
+    --file ironic-python-agent.kernel --progress
+
+glance image-create \
+    --store swift \
+    --name deploy-initrd \
+    --disk-format ari \
+    --container-format ari \
+    --visibility public \
+    --file ironic-python-agent.initramfs --progress
+EOF
+  }
+}
+resource "null_resource" "create_openstack_flavors" {
+  depends_on = [
+    null_resource.bundle
+  ]
+  provisioner "local-exec" {
+    command = <<EOF
+#!/bin/bash -x
+
+source novarc
+
+export RAM_MB=2048
+export CPU=2
+export DISK_GB=6
+export FLAVOR_NAME="baremetal-small"
+
+openstack flavor create --ram $RAM_MB --vcpus $CPU --disk $DISK_GB $FLAVOR_NAME
+openstack flavor set --property resources:CUSTOM_BAREMETAL_SMALL=1 $FLAVOR_NAME
+
+openstack flavor set --property resources:VCPU=0 $FLAVOR_NAME
+openstack flavor set --property resources:MEMORY_MB=0 $FLAVOR_NAME
+openstack flavor set --property resources:DISK_GB=0 $FLAVOR_NAME
+
+EOF
+  }
+}
+resource "null_resource" "create_openstack_key" {
+  depends_on = [
+    null_resource.bundle
+  ]
+  provisioner "local-exec" {
+    command = <<EOF
+#!/bin/bash -x
+source novarc
+openstack keypair create --public-key /home/ubuntu/.ssh/id_rsa.pub testkey
+EOF
+  }
+}
+resource "null_resource" "create_openstack_ironic_node" {
+  count = var.num_ironic_nodes
+  depends_on = [
+    null_resource.create_openstack_networks,
+    null_resource.upload_images,
+  ]
+  provisioner "local-exec" {
+    command = <<EOF
+#!/bin/bash -x
+
+source novarc
+
+export DEPLOY_VMLINUZ_UUID=$(openstack image show deploy-vmlinuz -f value -c id)
+export DEPLOY_INITRD_UUID=$(openstack image show deploy-initrd -f value -c id)
+export NETWORK_ID=$(openstack network show deployment -f value -c id)
+export NODE_NAME01="ironic-node0${count.index + 1}"
+export KVM_HOST_BRIDGE_IP=10.0.0.1
+export VBMC_PORT=623${count.index}
+export MAC="52:54:00:77:01:0${count.index + 1}"
+
+openstack baremetal node create --name $NODE_NAME01 \
+     --driver ipmi \
+     --deploy-interface direct \
+     --driver-info ipmi_address=$KVM_HOST_BRIDGE_IP \
+     --driver-info ipmi_username=admin \
+     --driver-info ipmi_password=password \
+     --driver-info ipmi_port=$VBMC_PORT \
+     --driver-info deploy_kernel=$DEPLOY_VMLINUZ_UUID \
+     --driver-info deploy_ramdisk=$DEPLOY_INITRD_UUID \
+     --driver-info cleaning_network=$NETWORK_ID \
+     --driver-info provisioning_network=$NETWORK_ID \
+     --property capabilities='boot_mode:uefi' \
+     --resource-class baremetal-small \
+     --property cpus=4 \
+     --property memory_mb=4096 \
+     --property local_gb=20
+
+export NODE_UUID01=$(openstack baremetal node show $NODE_NAME01 --format json | jq -r '.uuid')
+
+openstack baremetal port create $MAC \
+     --node $NODE_UUID01 \
+     --physical-network=physnet2
+openstack baremetal node manage $NODE_UUID01
+EOF
   }
 }
