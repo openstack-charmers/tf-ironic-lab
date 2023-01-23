@@ -39,6 +39,12 @@ variable "maas_nodes_vcpu" {
   default = 2
 }
 
+variable "maas_nodes_mem" {
+  description = "MAAS nodes memory"
+  type = string
+  default = "8192"
+}
+
 terraform {
   required_providers {
     libvirt = {
@@ -302,7 +308,7 @@ resource "libvirt_domain" "node" {
   ]
   count = var.num_maas_nodes
   name   = "node${count.index + 1}"
-  memory = "8192"
+  memory = var.maas_nodes_mem
   vcpu   = var.maas_nodes_vcpu
   autostart = false
   boot_device {
