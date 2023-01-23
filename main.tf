@@ -343,6 +343,13 @@ resource "libvirt_domain" "node" {
     wait_for_lease = false
   }
 
+  network_interface {
+    network_id     = libvirt_network.ironic_network.id
+    hostname       = "node${count.index + 1}"
+    mac            = "52:54:00:03:0${count.index + 1}:03"
+    wait_for_lease = false
+  }
+
   disk {
     volume_id = libvirt_volume.node_rootfs[count.index].id
   }
