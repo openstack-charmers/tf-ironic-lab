@@ -3,7 +3,7 @@ Description=A virtual BMC for controlling virtual machines using IPMI commands
 After=network.target
 
 [Service]
-ExecStart=vbmcd --foreground
+ExecStart=%h/.local/bin/vbmcd --foreground
 Restart=always
 Type=simple
 
