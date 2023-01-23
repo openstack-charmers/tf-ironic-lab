@@ -106,7 +106,7 @@ resource "libvirt_volume" "node_rootfs" {
   count = var.num_maas_nodes
   name = "node${count.index + 1}.qcow2"
   pool = "default"
-  size = 21474836480  # 20GiB
+  size = var.maas_nodes_rootfs_size
 }
 
 resource "libvirt_volume" "ironic_node_rootfs" {
