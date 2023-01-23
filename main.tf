@@ -33,6 +33,12 @@ variable "maas_nodes_rootfs_size" {
   default = 42949672960  # 40GiB
 }
 
+variable "maas_nodes_vcpu" {
+  description = "MAAS nodes number of vcpus"
+  type = number
+  default = 2
+}
+
 terraform {
   required_providers {
     libvirt = {
@@ -297,7 +303,7 @@ resource "libvirt_domain" "node" {
   count = var.num_maas_nodes
   name   = "node${count.index + 1}"
   memory = "8192"
-  vcpu   = 2
+  vcpu   = var.maas_nodes_vcpu
   autostart = false
   boot_device {
     dev = ["network", "hd"]
