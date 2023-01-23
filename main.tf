@@ -491,7 +491,8 @@ juju add-model ironic
 juju add-space ironic 10.10.0.0/24
 juju add-space main 10.0.0.0/24
 juju deploy ./ironic-bundle.yaml
-juju wait
+juju wait -x ironic-conductor
+juju run-action ironic-conductor/leader set-temp-url-secret --wait
 EOF
     when = create
   }
@@ -506,15 +507,12 @@ EOF
 
 resource "null_resource" "setup_vbmc" {
   depends_on = [
-    null_resource.bundle,
+    libvirt_domain.ironic_node,
   ]
-  provisioner "file" {
-    source      = "virtualbmc.service"
-    destination = pathexpand("~/.config/systemd/user/virtualbmc.service")
-  }
-
   provisioner "local-exec" {
     command = <<EOF
+mkdir -p ~/.config/systemd/user/
+cp ./virtualbmc.service ~/.config/systemd/user/virtualbmc.service
 systemctl --user daemon-reload
 sudo apt install -y pipx python3-venv
 pipx ensurepath
@@ -526,7 +524,13 @@ EOF
   }
 
   provisioner "local-exec" {
-    command = "pipx uninstall virtualbmc"
+    command = <<EOF
+#!/bin/bash -x
+systemctl --user stop virtualbmc || /bin/true
+rm ~/.config/systemd/user/virtualbmc.service
+systemctl --user daemon-reload
+pipx uninstall virtualbmc
+EOF
     when = destroy
   }
 }
