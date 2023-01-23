@@ -191,6 +191,10 @@ resource "libvirt_domain" "maas_controller" {
     password = "ubuntu"
     host = "10.0.0.2"
   }
+  provisioner "file" {
+    source = "./config-maas.sh"
+    destination = "/tmp/config-maas.sh"
+  }
 
   provisioner "remote-exec" {
     inline = [
@@ -203,8 +207,7 @@ resource "libvirt_domain" "maas_controller" {
       # TODO: rewrite this to take advantage of 'maas' terraform provider.
       "maas login admin http://localhost:5240/MAAS - < /home/ubuntu/admin-api-key >/dev/null",
       "until maas admin subnet read 10.0.0.0/24 | grep fabric- -m 1 ;do sleep 2;done",
-      "wget https://github.com/pmatulis/maas-one/raw/master/config-maas.sh",
-      "bash -ex ./config-maas.sh",
+      "bash -ex /tmp/config-maas.sh",
       "until [ -f /home/ubuntu/admin-api-key ]; do sleep 5; done",
       "maas admin tags create name=juju comment='Juju controller'",
       "set +x",
@@ -213,6 +216,7 @@ resource "libvirt_domain" "maas_controller" {
       "echo block until there is a ipxe.cfg available",
       "until wget -O - http://10.0.0.2:5248/ipxe.cfg; do sleep 5;done",
       "echo wait for images to be fully unpacked",
+      # 20.04 is used for commissioning, if a different image is used, then change the URL accordingly
       "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-20.04/focal/stable/boot-initrd; do sleep 5;done",
       "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-20.04/focal/stable/boot-kernel; do sleep 5;done",
     ]
