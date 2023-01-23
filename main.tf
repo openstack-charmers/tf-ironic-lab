@@ -514,6 +514,7 @@ resource "null_resource" "setup_vbmc" {
     libvirt_domain.ironic_node,
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
 mkdir -p ~/.config/systemd/user/
 cp ./virtualbmc.service ~/.config/systemd/user/virtualbmc.service
@@ -528,8 +529,8 @@ EOF
   }
 
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
-#!/bin/bash -x
 systemctl --user stop virtualbmc || /bin/true
 rm ~/.config/systemd/user/virtualbmc.service
 systemctl --user daemon-reload
@@ -545,8 +546,8 @@ resource "null_resource" "configure_vbmc" {
     null_resource.setup_vbmc,
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
-#!/bin/bash -ex
 IPMI_PORT=623${count.index}
 vbmc add baremetal${count.index + 1} --port $IPMI_PORT
 ipmitool -I lanplus -U admin -P password -H 10.0.0.1  -p $IPMI_PORT power status
@@ -560,9 +561,8 @@ resource "null_resource" "create_openstack_networks" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
-#!/bin/bash -x
-
 source novarc
 
 openstack router create ironic-router
@@ -594,9 +594,8 @@ resource "null_resource" "upload_images" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
-#!/bin/bash
-
 source novarc
 
 if [[ ! -f ironic-python-agent.initramfs ]]; then
@@ -642,6 +641,7 @@ resource "null_resource" "create_openstack_flavors" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
 #!/bin/bash -x
 
@@ -667,6 +667,7 @@ resource "null_resource" "create_openstack_key" {
     null_resource.bundle
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
 #!/bin/bash -x
 source novarc
@@ -681,9 +682,8 @@ resource "null_resource" "create_openstack_ironic_node" {
     null_resource.upload_images,
   ]
   provisioner "local-exec" {
+    interpreter = ["/bin/bash", "-x"]
     command = <<EOF
-#!/bin/bash -x
-
 source novarc
 
 export DEPLOY_VMLINUZ_UUID=$(openstack image show deploy-vmlinuz -f value -c id)
