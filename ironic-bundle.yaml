@@ -1,0 +1,378 @@
+variables:
+  openstack-origin: &openstack-origin distro
+  data-port: &data-port br-ex:ens4 br-deployment:ens5
+  worker-multiplier: &worker-multiplier 0.25
+  osd-devices: &osd-devices /dev/sdb /dev/vdb
+  expected-osd-count: &expected-osd-count 3
+  expected-mon-count: &expected-mon-count 3
+  oam-space: &oam-space main
+  data-space: &data-space data
+  
+machines:
+  "1":
+    series: focal
+  "2":
+    series: focal
+  "3":
+    series: focal
+  "4":
+    series: focal
+relations:
+- - nova-ironic
+  - ironic-api
+- - ironic-conductor
+  - ironic-api
+- - neutron-ironic-agent:identity-credentials
+  - keystone
+- - neutron-ironic-agent
+  - neutron-api
+- - neutron-openvswitch
+  - neutron-api
+- - ironic-api:amqp
+  - rabbitmq-server:amqp
+- - ironic-api
+  - keystone
+- - ironic-api:shared-db
+  - mysql:shared-db
+- - ironic-conductor:amqp
+  - rabbitmq-server:amqp
+- - ironic-conductor
+  - keystone
+- - ironic-conductor:shared-db
+  - mysql:shared-db
+- - nova-ironic:amqp
+  - rabbitmq-server:amqp
+- - nova-ironic
+  - glance
+- - nova-ironic
+  - keystone
+- - nova-ironic
+  - nova-cloud-controller
+- - neutron-gateway:amqp
+  - rabbitmq-server:amqp
+- - keystone:shared-db
+  - mysql:shared-db
+- - nova-cloud-controller:identity-service
+  - keystone:identity-service
+- - glance:identity-service
+  - keystone:identity-service
+- - neutron-api:identity-service
+  - keystone:identity-service
+- - neutron-api:shared-db
+  - mysql:shared-db
+- - neutron-api:amqp
+  - rabbitmq-server:amqp
+- - neutron-gateway:neutron-plugin-api
+  - neutron-api:neutron-plugin-api
+- - glance:shared-db
+  - mysql:shared-db
+- - glance:amqp
+  - rabbitmq-server:amqp
+- - nova-cloud-controller:image-service
+  - glance:image-service
+- - nova-cloud-controller:amqp
+  - rabbitmq-server:amqp
+- - nova-cloud-controller:quantum-network-service
+  - neutron-gateway:quantum-network-service
+- - openstack-dashboard:identity-service
+  - keystone:identity-service
+- - openstack-dashboard:shared-db
+  - mysql:shared-db
+- - nova-cloud-controller:shared-db
+  - mysql:shared-db
+- - nova-cloud-controller:neutron-api
+  - neutron-api:neutron-api
+- - cinder:image-service
+  - glance:image-service
+- - cinder:amqp
+  - rabbitmq-server:amqp
+- - cinder:identity-service
+  - keystone:identity-service
+- - cinder:cinder-volume-service
+  - nova-cloud-controller:cinder-volume-service
+- - cinder:shared-db
+  - mysql:shared-db
+- - ntp:juju-info
+  - neutron-gateway
+- - ntp:juju-info
+  - neutron-gateway:juju-info
+- - placement
+  - mysql
+- - placement
+  - keystone
+- - placement
+  - nova-cloud-controller
+- - ceph-mon:client
+  - nova-ironic:ceph
+- - ceph-mon:client
+  - glance:ceph
+- - ceph-radosgw:mon
+  - ceph-mon:radosgw
+- - ceph-radosgw:identity-service
+  - keystone:identity-service
+- - ceph-osd:mon
+  - ceph-mon:osd
+- - ceph-radosgw:object-store
+  - glance
+- - cinder-ceph:storage-backend
+  - cinder:storage-backend
+- - ceph-mon:client
+  - cinder-ceph:ceph
+- - nova-ironic:ceph-access
+  - cinder-ceph:ceph-access
+series: focal
+applications:
+  cinder:
+    series: focal
+    annotations:
+      gui-x: '750'
+      gui-y: '0'
+    charm: cs:cinder
+    num_units: 1
+    bindings:
+      "": *oam-space
+    options:
+      glance-api-version: 2
+      openstack-origin: *openstack-origin
+      worker-multiplier: *worker-multiplier
+    to:
+      - "lxd:2"
+  cinder-ceph:
+    annotations:
+      gui-x: '1120'
+      gui-y: '1400'
+    charm: cs:cinder-ceph
+    num_units: 0
+  ceph-radosgw:
+    annotations:
+      gui-x: '1000'
+      gui-y: '250'
+    charm: cs:ceph-radosgw
+    num_units: 1
+    bindings:
+      "": *oam-space
+    options:
+      source: *openstack-origin
+      namespace-tenants: True
+    series: focal
+    to:
+      - "lxd:3"
+  ceph-mon:
+    annotations:
+      gui-x: '750'
+      gui-y: '500'
+    charm: cs:ceph-mon
+    num_units: 3
+    options:
+      expected-osd-count: *expected-osd-count
+      monitor-count: *expected-mon-count
+      source: *openstack-origin
+    series: focal
+    to:
+      - "lxd:2"
+      - "lxd:3"
+      - "lxd:4"
+  ceph-osd:
+    annotations:
+      gui-x: '1000'
+      gui-y: '500'
+    charm: cs:ceph-osd
+    num_units: 3
+    options:
+      osd-devices: *osd-devices
+      source: *openstack-origin
+    series: focal
+    to:
+      - "2"
+      - "3"
+      - "4"
+  glance:
+    annotations:
+      gui-x: '250'
+      gui-y: '0'
+    charm: cs:glance
+    series: focal
+    num_units: 1
+    bindings:
+      "": *oam-space
+    options:
+      openstack-origin: *openstack-origin
+      worker-multiplier: *worker-multiplier
+    to:
+      - "lxd:4"
+  keystone:
+    annotations:
+      gui-x: '500'
+      gui-y: '0'
+    charm: cs:keystone
+    num_units: 1
+    series: focal
+    bindings:
+      "": *oam-space
+    options:
+      openstack-origin: *openstack-origin
+      worker-multiplier: *worker-multiplier
+    to:
+      - "lxd:2"
+  mysql:
+    annotations:
+      gui-x: '0'
+      gui-y: '250'
+    charm: cs:percona-cluster
+    series: bionic
+    num_units: 1
+    bindings:
+      "": *oam-space
+    options:
+      innodb-buffer-pool-size: 256M
+      max-connections: 1000
+      performance-schema: true
+    to:
+      - "lxd:3"
+  neutron-api:
+    annotations:
+      gui-x: '500'
+      gui-y: '500'
+    charm: cs:neutron-api
+    num_units: 1
+    series: focal
+    bindings:
+      "": *oam-space
+    options:
+      flat-network-providers: "physnet1 physnet2"
+      neutron-security-groups: true
+      openstack-origin: *openstack-origin
+      manage-neutron-plugin-legacy-mode: false
+      worker-multiplier: *worker-multiplier
+    to:
+      - "lxd:4"
+  neutron-gateway:
+    annotations:
+      gui-x: '0'
+      gui-y: '0'
+    charm: cs:neutron-gateway
+    comment: SET data-port to match your environment
+    num_units: 1
+    series: focal
+    bindings:
+      "": *oam-space
+    #  data: *data-space
+    options:
+      bridge-mappings: physnet1:br-ex physnet2:br-deployment
+      data-port: *data-port
+      openstack-origin: *openstack-origin
+      enable-isolated-metadata: true
+      enable-metadata-network: true
+      worker-multiplier: *worker-multiplier
+    to:
+      - 1
+  nova-cloud-controller:
+    annotations:
+      gui-x: '0'
+      gui-y: '500'
+    charm: cs:~openstack-charmers-next/nova-cloud-controller
+    num_units: 1
+    series: focal
+    bindings:
+      "": *oam-space
+    options:
+      network-manager: Neutron
+      openstack-origin: *openstack-origin
+      worker-multiplier: *worker-multiplier
+    to:
+      - "lxd:2"
+  nova-ironic:
+    charm: cs:~openstack-charmers-next/nova-compute
+    series: focal
+    num_units: 1
+    bindings:
+      "": *oam-space
+    options:
+      enable-live-migration: false
+      enable-resize: false
+      openstack-origin: *openstack-origin
+      virt-type: ironic
+    to:
+      - "lxd:3"
+  ntp:
+    annotations:
+      gui-x: '1000'
+      gui-y: '0'
+    charm: cs:ntp
+    series: focal
+    num_units: 0
+  openstack-dashboard:
+    annotations:
+      gui-x: '500'
+      gui-y: '-250'
+    charm: cs:openstack-dashboard
+    num_units: 1
+    series: focal
+    bindings:
+      "": *oam-space
+    options:
+      openstack-origin: *openstack-origin
+    to:
+      - "lxd:4"
+  placement:
+    annotations:
+      gui-x: '0'
+      gui-y: '500'
+    charm: cs:placement
+    num_units: 1
+    series: focal
+    bindings:
+      "": *oam-space
+    options:
+      openstack-origin: *openstack-origin
+      worker-multiplier: *worker-multiplier
+    to:
+      - "lxd:2"
+  rabbitmq-server:
+    annotations:
+      gui-x: '500'
+      gui-y: '250'
+    charm: cs:rabbitmq-server
+    series: focal
+    num_units: 1
+    bindings:
+      "": *oam-space
+    to:
+      - "lxd:3"
+  ironic-api:
+    charm: cs:~openstack-charmers-next/ironic-api
+    num_units: 1
+    series: focal
+    options:
+      openstack-origin: *openstack-origin
+    bindings:
+      "": *oam-space
+    to:
+      - "lxd:4"
+  ironic-conductor:
+    charm: cs:~openstack-charmers-next/ironic-conductor
+    num_units: 1
+    series: focal
+    options:
+      openstack-origin: *openstack-origin
+      max-tftp-block-size: 1418
+      disable-secure-erase: true
+      use-ipxe: true
+      enabled-network-interfaces: "flat, noop"
+    bindings:
+      "": *oam-space
+    to:
+      - "lxd:2"
+  neutron-openvswitch:
+    charm: cs:neutron-openvswitch
+    num_units: 0
+    series: focal
+    options:
+      bridge-mappings: physnet1:br-ex physnet2:br-deployment
+      data-port: *data-port
+  neutron-ironic-agent:
+    charm: cs:~openstack-charmers-next/neutron-api-plugin-ironic
+    num_units: 0
+    series: focal
+    options:
+      openstack-origin: *openstack-origin

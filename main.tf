@@ -9,6 +9,30 @@ variable "num_maas_nodes" {
   default     = 4
 }
 
+variable "num_ironic_nodes" {
+  description = "Number of VMs to create and use as fake baremetal nodes"
+  type        = number
+  default     = 3
+}
+
+variable "kvm_host_username" {
+  description = "KVM host username to use when configuring virsh"
+  type = string
+  default = "ubuntu"
+}
+
+variable "ironic_nodes_rootfs_size" {
+  description = "Fake baremetal nodes rootfs disk size (in bytes)"
+  type = number
+  default = 21474836480  # 20GiB
+}
+
+variable "maas_nodes_rootfs_size" {
+  description = "MAAS nodes rootfs disk size (in bytes)"
+  type = number
+  default = 42949672960  # 40GiB
+}
+
 terraform {
   required_providers {
     libvirt = {
@@ -41,6 +65,14 @@ resource "libvirt_network" "oam_network" {
   bridge = "virt-oam"
   dhcp { enabled = false }  # dhcp provided by maas
 }
+resource "libvirt_network" "ironic_network" {
+  name = "ironic"
+  mode = "nat"
+  domain = "ironic.libvirt"
+  addresses = ["10.10.0.0/24"]
+  bridge = "virt-ironic"
+  dhcp { enabled = false }  # dhcp provided by Neutron
+}
 resource "libvirt_network" "external_network" {
   name = "external"
   mode = "nat"
@@ -49,15 +81,6 @@ resource "libvirt_network" "external_network" {
   bridge = "virt-external"
   dhcp { enabled = true }
 }
-resource "libvirt_network" "ironic_network" {
-  name = "ironic"
-  mode = "nat"
-  domain = "ironic.libvirt"
-  addresses = ["10.30.0.0/24"]
-  bridge = "virt-ironic"
-  dhcp { enabled = false }  # dhcp provided by Neutron
-}
-
 # Defining VM Volume
 resource "libvirt_volume" "ubuntu_focal" {
   name = "ubuntu-focal.qcow2"
@@ -84,6 +107,13 @@ resource "libvirt_volume" "node_rootfs" {
   name = "node${count.index + 1}.qcow2"
   pool = "default"
   size = 21474836480  # 20GiB
+}
+
+resource "libvirt_volume" "ironic_node_rootfs" {
+  count = var.num_ironic_nodes
+  name = "ironic-node${count.index + 1}.qcow2"
+  pool = "default"
+  size = var.ironic_nodes_rootfs_size
 }
 
 # cloud-init config for maas-controller
@@ -114,7 +144,13 @@ resource "libvirt_domain" "maas_controller" {
   network_interface {
     network_id     = libvirt_network.oam_network.id
     hostname       = "maas-controller"
-    mac            = "52:54:00:02:01:01"
+    mac            = "52:54:00:01:01:02"
+    wait_for_lease = false
+  }
+
+  network_interface {
+    network_id     = libvirt_network.ironic_network.id
+    mac            = "52:54:00:01:01:03"
     wait_for_lease = false
   }
 
@@ -132,6 +168,7 @@ resource "libvirt_domain" "maas_controller" {
 
   provisioner "remote-exec" {
     inline = [
+      "#!/bin/bash -x",
       "cloud-init status --wait",
       "until nc -v -z localhost 5240; do sleep 5;done",
       "sudo cat /var/snap/maas/current/root/.ssh/id_rsa.pub | tee /home/ubuntu/.ssh/authorized_keys",
@@ -143,8 +180,15 @@ resource "libvirt_domain" "maas_controller" {
       "wget https://github.com/pmatulis/maas-one/raw/master/config-maas.sh",
       "bash -ex ./config-maas.sh",
       "until [ -f /home/ubuntu/admin-api-key ]; do sleep 5; done",
-      # block until images have been imported, otherwise pxe booting won't succeed.
+      "maas admin tags create name=juju comment='Juju controller'",
+      "set +x",
+      "echo block until images have been imported, otherwise pxe booting will not succeed.",
       "until maas admin boot-resources is-importing | tail -1 | grep false;do sleep 10;done",
+      "echo block until there is a ipxe.cfg available",
+      "until wget -O - http://10.0.0.2:5248/ipxe.cfg; do sleep 5;done",
+      "echo wait for images to be fully unpacked",
+      "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-20.04/focal/stable/boot-initrd; do sleep 5;done",
+      "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-20.04/focal/stable/boot-kernel; do sleep 5;done",
     ]
   }
 
@@ -180,22 +224,22 @@ resource "null_resource" "append_maas_ssh_key" {
     data.remote_file.maas_ssh_key
   ]
   provisioner "local-exec" {
-    command = "echo ${data.remote_file.maas_ssh_key.content} | tee -a ~/.ssh/authorized_keys"
+    command = "echo '${data.remote_file.maas_ssh_key.content}' | tee -a ~/.ssh/authorized_keys"
     when = create
   }
 }
 
 resource "libvirt_domain" "juju_controller" {
   depends_on = [
-    libvirt_domain.maas_controller
+    libvirt_domain.maas_controller,
+    libvirt_network.oam_network,
   ]
   name   = "juju-controller"
   memory = "4096"
   vcpu   = 2
-  running = false
   autostart = false
   boot_device {
-    dev = ["network"]
+    dev = ["network", "hd"]
   }
 
   network_interface {
@@ -220,17 +264,43 @@ resource "libvirt_domain" "juju_controller" {
     listen_type = "address"
     autoport = true
   }
+
+  connection {
+    type     = "ssh"
+    user     = "ubuntu"
+    password = "ubuntu"
+    host = "10.0.0.2"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "#!/bin/bash -x",
+      "MAC_ADDR=52:54:00:02:01:01",
+      "NODE_NAME=juju-controller",
+      "until [[ $(maas admin machines read mac_address=$MAC_ADDR | jq -r 'length') == 1 ]];do sleep 5;done",
+      "SYSTEM_ID=$(maas admin machines read mac_address=$MAC_ADDR | grep -i system_id -m 1 | cut -d '\"' -f 4)",
+      "maas admin tag update-nodes juju add=$SYSTEM_ID",
+      "maas admin machine update $SYSTEM_ID hostname=$NODE_NAME power_type=virsh power_parameters_power_address=qemu+ssh://${var.kvm_host_username}@10.0.0.1/system power_parameters_power_id=$NODE_NAME",
+      "until [ \"$(maas admin machines read mac_address=$MAC_ADDR | jq -r '.[]|.status_name')\" == \"New\" ]; do sleep 10;done",
+      "maas admin machine commission $SYSTEM_ID testing_scripts=none",
+      "until [ \"$(maas admin machines read mac_address=$MAC_ADDR | jq -r '.[]|.status_name')\" == \"Ready\" ]; do sleep 10;done",
+    ]
+    when = create
+  }
 }
 
 resource "libvirt_domain" "node" {
+  depends_on = [
+    libvirt_domain.maas_controller,
+    libvirt_network.oam_network,
+    libvirt_network.ironic_network,
+  ]
   count = var.num_maas_nodes
   name   = "node${count.index + 1}"
-  memory = "4096"
+  memory = "8192"
   vcpu   = 2
-  running = false
   autostart = false
   boot_device {
-    dev = ["network"]
+    dev = ["network", "hd"]
   }
 
   network_interface {
@@ -240,8 +310,73 @@ resource "libvirt_domain" "node" {
     wait_for_lease = false
   }
 
+  network_interface {
+    network_id     = libvirt_network.oam_network.id
+    hostname       = "node${count.index + 1}"
+    mac            = "52:54:00:03:0${count.index + 1}:02"
+    wait_for_lease = false
+  }
+
   disk {
     volume_id = libvirt_volume.node_rootfs[count.index].id
+  }
+
+  console {
+    type = "pty"
+    target_type = "serial"
+    target_port = "0"
+  }
+
+  graphics {
+    type = "spice"
+    listen_type = "address"
+    autoport = true
+  }
+  connection {
+    type     = "ssh"
+    user     = "ubuntu"
+    password = "ubuntu"
+    host = "10.0.0.2"
+  }
+  provisioner "remote-exec" {
+    inline = [
+      "#!/bin/bash -x",
+      "MAC_ADDR=52:54:00:03:0${count.index + 1}:01",
+      "NODE_NAME=\"node${count.index + 1}\"",
+      "until [[ $(maas admin machines read mac_address=$MAC_ADDR | jq -r 'length') == 1 ]];do sleep 5;done",
+      "SYSTEM_ID=$(maas admin machines read mac_address=$MAC_ADDR | grep -i system_id -m 1 | cut -d '\"' -f 4)",
+      "maas admin machine update $SYSTEM_ID hostname=$NODE_NAME power_type=virsh power_parameters_power_address=qemu+ssh://${var.kvm_host_username}@10.0.0.1/system power_parameters_power_id=$NODE_NAME",
+      "until [ \"$(maas admin machines read mac_address=$MAC_ADDR | jq -r '.[]|.status_name')\" == \"New\" ]; do sleep 10;done",
+      "maas admin machine commission $SYSTEM_ID testing_scripts=none",
+      "until [ \"$(maas admin machines read mac_address=$MAC_ADDR | jq -r '.[]|.status_name')\" == \"Ready\" ]; do sleep 10;done",
+    ]
+    when = create
+  }
+}
+
+resource "libvirt_domain" "ironic_node" {
+  depends_on = [
+    libvirt_domain.maas_controller
+  ]
+  count = var.num_ironic_nodes
+  name   = "ironic-node${count.index + 1}"
+  memory = "4096"
+  vcpu   = 2
+  running = false
+  autostart = false
+  boot_device {
+    dev = ["network"]
+  }
+
+  network_interface {
+    network_id     = libvirt_network.ironic_network.id
+    hostname       = "ironic-node${count.index + 1}"
+    mac            = "52:54:00:77:01:0${count.index + 1}"
+    wait_for_lease = false
+  }
+
+  disk {
+    volume_id = libvirt_volume.ironic_node_rootfs[count.index].id
   }
 
   console {
@@ -275,101 +410,54 @@ resource "local_file" "maas_admin_api_key" {
   filename = pathexpand("~/admin-api-key")
 }
 
-resource "null_resource" "power_juju_controller" {
-  depends_on = [
-    libvirt_domain.maas_controller
-  ]
-  provisioner "local-exec" {
-    command = "virsh start juju-controller"
-    when = create
-  }
-}
-
-resource "null_resource" "power_on_nodes" {
-  depends_on = [
-    libvirt_domain.maas_controller
-  ]
-  count = var.num_maas_nodes
-  provisioner "local-exec" {
-    command = "virsh start node${count.index + 1}"
-    when = create
-  }
-}
-
-resource "null_resource" "config_nodes" {
-  depends_on = [
-    null_resource.power_on_nodes
-  ]
-  connection {
-    type     = "ssh"
-    user     = "ubuntu"
-    password = "ubuntu"
-    host = "10.0.0.2"
-  }
-
-  provisioner "remote-exec" {
-    inline = [
-      "#!/bin/bash",
-      "until [[ $(maas admin machines read | jq -r '.[]|.hostname' |wc -l) == 4 ]];do sleep 5;done",
-      "wget https://github.com/pmatulis/maas-one/raw/master/config-nodes.sh",
-      "bash -x ./config-nodes.sh",
-    ]
-  }
-}
-
 resource "null_resource" "cloud_and_creds" {
   depends_on = [
     libvirt_domain.maas_controller,
     local_file.maas_admin_api_key,
-    null_resource.config_nodes,
   ]
   provisioner "local-exec" {
     command = "wget -O cloud-and-creds.sh https://github.com/pmatulis/maas-one/raw/master/cloud-and-creds.sh && bash -x ./cloud-and-creds.sh"
     when = create
   }
+  provisioner "local-exec" {
+    command = "juju remove-credential --force --client maas-one maas-one ; juju remove-cloud --client maas-one"
+    when = destroy
+  }
 }
 
-resource "null_resource" "juju-bootstrap" {
+resource "null_resource" "juju_bootstrap" {
   depends_on = [
     null_resource.cloud_and_creds
   ]
   provisioner "local-exec" {
-    command = "juju bootstrap --bootstrap-constraints tags=juju maas-one maas-one"
+    command = "until juju bootstrap --bootstrap-constraints tags=juju maas-one maas-one; do sleep 10 ; done"
     when = create
   }
-}
-
-
-# destroy controller
-resource "null_resource" "destroy_controller" {
   provisioner "local-exec" {
-    command = "juju destroy-controller --destroy-all-models -y maas-one || /bin/true"
+    command = "juju destroy-controller --destroy-all-models -y maas-one || juju kill-controller -y maas-one || juju unregister -y maas-one || /bin/true"
     when = destroy
   }
 }
 
-# unregister the cloud
-resource "null_resource" "remove_cloud_and_creds" {
+resource "null_resource" "bundle" {
+  depends_on = [
+    null_resource.juju_bootstrap
+  ]
   provisioner "local-exec" {
-    command = "juju remove-credential --force --client maas-one ; juju remove-cloud --client maas-one"
+    command = <<EOF
+juju add-model ironic
+juju add-space ironic 10.10.0.0/24
+juju add-space main 10.0.0.0/24
+juju deploy ./ironic-bundle.yaml
+juju wait
+EOF
+    when = create
+  }
+
+  provisioner "local-exec" {
+    command = <<EOF
+juju destroy-model -y ironic || /bin/true
+EOF
     when = destroy
   }
 }
-
-
-
-# provider "maas" {
-#   api_version = "2.0"
-#   api_key = "${data.remote_file.maas_admin_api_key.content}"
-#   api_url = "http://${libvirt_domain.maas_controller.network_interface.0.addresses.0}:5240/MAAS"
-# }
-
-
-# resource "maas_machine" "juju_controller" {
-#   power_type = "virsh"
-#   power_parameters = {
-#     power_address = "qemu+ssh://ubuntu@10.0.0.1/system"
-#     power_id = libvirt_domain.maas_controller.name
-#   }
-#   pxe_mac_address = libvirt_domain.juju_controller.network_interface.0.mac
-# }
