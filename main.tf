@@ -553,7 +553,8 @@ resource "null_resource" "configure_vbmc" {
     command = <<EOF
 IPMI_PORT=623${count.index}
 vbmc add baremetal${count.index + 1} --port $IPMI_PORT
-ipmitool -I lanplus -U admin -P password -H 10.0.0.1  -p $IPMI_PORT power status
+vbmc start baremetal${count.index + 1}
+until ipmitool -I lanplus -U admin -P password -H 10.0.0.1  -p $IPMI_PORT power status; do sleep 5;done
 EOF
     when = create
   }
