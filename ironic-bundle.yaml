@@ -7,16 +7,19 @@ variables:
   expected-mon-count: &expected-mon-count 3
   oam-space: &oam-space main
   data-space: &data-space data
-  
+  openstack-channel: &openstack-channel ussuri/edge
+  ceph-channel: &ceph-channel octopus/edge
+  series: &series focal
+
 machines:
   "1":
-    series: focal
+    series: *series
   "2":
-    series: focal
+    series: *series
   "3":
-    series: focal
+    series: *series
   "4":
-    series: focal
+    series: *series
 relations:
 - - nova-ironic
   - ironic-api
@@ -33,13 +36,17 @@ relations:
 - - ironic-api
   - keystone
 - - ironic-api:shared-db
-  - mysql:shared-db
+  - ironic-api-mysql-router:shared-db
+- - ironic-api-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - ironic-conductor:amqp
   - rabbitmq-server:amqp
 - - ironic-conductor
   - keystone
 - - ironic-conductor:shared-db
-  - mysql:shared-db
+  - ironic-conductor-mysql-router:shared-db
+- - ironic-conductor-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - nova-ironic:amqp
   - rabbitmq-server:amqp
 - - nova-ironic
@@ -51,7 +58,9 @@ relations:
 - - neutron-gateway:amqp
   - rabbitmq-server:amqp
 - - keystone:shared-db
-  - mysql:shared-db
+  - keystone-mysql-router:shared-db
+- - keystone-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - nova-cloud-controller:identity-service
   - keystone:identity-service
 - - glance:identity-service
@@ -59,13 +68,17 @@ relations:
 - - neutron-api:identity-service
   - keystone:identity-service
 - - neutron-api:shared-db
-  - mysql:shared-db
+  - neutron-api-mysql-router:shared-db
+- - neutron-api-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - neutron-api:amqp
   - rabbitmq-server:amqp
 - - neutron-gateway:neutron-plugin-api
   - neutron-api:neutron-plugin-api
 - - glance:shared-db
-  - mysql:shared-db
+  - glance-mysql-router:shared-db
+- - glance-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - glance:amqp
   - rabbitmq-server:amqp
 - - nova-cloud-controller:image-service
@@ -77,9 +90,13 @@ relations:
 - - openstack-dashboard:identity-service
   - keystone:identity-service
 - - openstack-dashboard:shared-db
-  - mysql:shared-db
+  - openstack-dashboard-mysql-router:shared-db
+- - openstack-dashboard-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - nova-cloud-controller:shared-db
-  - mysql:shared-db
+  - nova-cloud-controller-mysql-router:shared-db
+- - nova-cloud-controller-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - nova-cloud-controller:neutron-api
   - neutron-api:neutron-api
 - - cinder:image-service
@@ -91,13 +108,17 @@ relations:
 - - cinder:cinder-volume-service
   - nova-cloud-controller:cinder-volume-service
 - - cinder:shared-db
-  - mysql:shared-db
+  - cinder-mysql-router:shared-db
+- - cinder-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - ntp:juju-info
   - neutron-gateway
 - - ntp:juju-info
   - neutron-gateway:juju-info
 - - placement
-  - mysql
+  - placement-mysql-router:shared-db
+- - placement-mysql-router:db-router
+  - mysql-innodb-cluster:db-router
 - - placement
   - keystone
 - - placement
@@ -120,14 +141,50 @@ relations:
   - cinder-ceph:ceph
 - - nova-ironic:ceph-access
   - cinder-ceph:ceph-access
-series: focal
+series: *series
 applications:
+  ironic-api-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  ironic-conductor-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  keystone-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  neutron-api-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  glance-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  openstack-dashboard-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  nova-cloud-controller-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  cinder-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
+  placement-mysql-router:
+    charm: ch:mysql-router
+    channel: 8.0/edge
+    num_units: 0
   cinder:
-    series: focal
     annotations:
       gui-x: '750'
       gui-y: '0'
-    charm: cs:cinder
+    charm: ch:cinder
+    channel: *openstack-channel
     num_units: 1
     bindings:
       "": *oam-space
@@ -141,33 +198,34 @@ applications:
     annotations:
       gui-x: '1120'
       gui-y: '1400'
-    charm: cs:cinder-ceph
+    charm: ch:cinder-ceph
+    channel: *openstack-channel
     num_units: 0
   ceph-radosgw:
     annotations:
       gui-x: '1000'
       gui-y: '250'
-    charm: cs:ceph-radosgw
+    charm: ch:ceph-radosgw
+    channel: *ceph-channel
     num_units: 1
     bindings:
       "": *oam-space
     options:
       source: *openstack-origin
       namespace-tenants: True
-    series: focal
     to:
       - "lxd:3"
   ceph-mon:
     annotations:
       gui-x: '750'
       gui-y: '500'
-    charm: cs:ceph-mon
+    charm: ch:ceph-mon
+    channel: *ceph-channel
     num_units: 3
     options:
       expected-osd-count: *expected-osd-count
       monitor-count: *expected-mon-count
       source: *openstack-origin
-    series: focal
     to:
       - "lxd:2"
       - "lxd:3"
@@ -176,12 +234,12 @@ applications:
     annotations:
       gui-x: '1000'
       gui-y: '500'
-    charm: cs:ceph-osd
+    charm: ch:ceph-osd
+    channel: *ceph-channel
     num_units: 3
     options:
       osd-devices: *osd-devices
       source: *openstack-origin
-    series: focal
     to:
       - "2"
       - "3"
@@ -190,8 +248,8 @@ applications:
     annotations:
       gui-x: '250'
       gui-y: '0'
-    charm: cs:glance
-    series: focal
+    charm: ch:glance
+    channel: *openstack-channel
     num_units: 1
     bindings:
       "": *oam-space
@@ -204,9 +262,9 @@ applications:
     annotations:
       gui-x: '500'
       gui-y: '0'
-    charm: cs:keystone
+    charm: ch:keystone
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     bindings:
       "": *oam-space
     options:
@@ -215,28 +273,23 @@ applications:
       worker-multiplier: *worker-multiplier
     to:
       - "lxd:2"
-  mysql:
-    annotations:
-      gui-x: '0'
-      gui-y: '250'
-    charm: cs:percona-cluster
-    series: bionic
-    num_units: 1
+  mysql-innodb-cluster:
+    charm: ch:mysql-innodb-cluster
+    channel: 8.0/edge
+    num_units: 3
     bindings:
       "": *oam-space
-    options:
-      innodb-buffer-pool-size: 256M
-      max-connections: 1000
-      performance-schema: true
     to:
+      - "lxd:1"
+      - "lxd:2"
       - "lxd:3"
   neutron-api:
     annotations:
       gui-x: '500'
       gui-y: '500'
-    charm: cs:neutron-api
+    charm: ch:neutron-api
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     bindings:
       "": *oam-space
     options:
@@ -251,10 +304,10 @@ applications:
     annotations:
       gui-x: '0'
       gui-y: '0'
-    charm: cs:neutron-gateway
+    charm: ch:neutron-gateway
+    channel: *openstack-channel
     comment: SET data-port to match your environment
     num_units: 1
-    series: focal
     bindings:
       "": *oam-space
     #  data: *data-space
@@ -271,9 +324,9 @@ applications:
     annotations:
       gui-x: '0'
       gui-y: '500'
-    charm: cs:~openstack-charmers-next/nova-cloud-controller
+    charm: ch:nova-cloud-controller
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     bindings:
       "": *oam-space
     options:
@@ -283,8 +336,8 @@ applications:
     to:
       - "lxd:2"
   nova-ironic:
-    charm: cs:~openstack-charmers-next/nova-compute
-    series: focal
+    charm: ch:nova-compute
+    channel: *openstack-channel
     num_units: 1
     bindings:
       "": *oam-space
@@ -299,16 +352,15 @@ applications:
     annotations:
       gui-x: '1000'
       gui-y: '0'
-    charm: cs:ntp
-    series: focal
+    charm: ch:ntp
     num_units: 0
   openstack-dashboard:
     annotations:
       gui-x: '500'
       gui-y: '-250'
-    charm: cs:openstack-dashboard
+    charm: ch:openstack-dashboard
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     bindings:
       "": *oam-space
     options:
@@ -319,9 +371,9 @@ applications:
     annotations:
       gui-x: '0'
       gui-y: '500'
-    charm: cs:placement
+    charm: ch:placement
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     bindings:
       "": *oam-space
     options:
@@ -333,17 +385,17 @@ applications:
     annotations:
       gui-x: '500'
       gui-y: '250'
-    charm: cs:rabbitmq-server
-    series: focal
+    charm: ch:rabbitmq-server
+    channel: 3.9/edge
     num_units: 1
     bindings:
       "": *oam-space
     to:
       - "lxd:3"
   ironic-api:
-    charm: cs:~openstack-charmers-next/ironic-api
+    charm: ch:ironic-api
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     options:
       openstack-origin: *openstack-origin
     bindings:
@@ -351,9 +403,9 @@ applications:
     to:
       - "lxd:4"
   ironic-conductor:
-    charm: cs:~openstack-charmers-next/ironic-conductor
+    charm: ch:ironic-conductor
+    channel: *openstack-channel
     num_units: 1
-    series: focal
     options:
       openstack-origin: *openstack-origin
       max-tftp-block-size: 1418
@@ -365,15 +417,15 @@ applications:
     to:
       - "lxd:2"
   neutron-openvswitch:
-    charm: cs:neutron-openvswitch
+    charm: ch:neutron-openvswitch
+    channel: *openstack-channel
     num_units: 0
-    series: focal
     options:
       bridge-mappings: physnet1:br-ex physnet2:br-deployment
       data-port: *data-port
   neutron-ironic-agent:
-    charm: cs:~openstack-charmers-next/neutron-api-plugin-ironic
+    charm: ch:neutron-api-plugin-ironic
+    channel: *openstack-channel
     num_units: 0
-    series: focal
     options:
       openstack-origin: *openstack-origin
