@@ -2,7 +2,7 @@
 
 #set -e
 
-IMAGE_SERIES="bionic focal jammy"
+IMAGE_SERIES="jammy"
 PROFILE=admin
 API_KEY_FILE=$HOME/admin-api-key
 KVM_INTERNAL_IP=10.0.0.1

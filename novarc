@@ -6,12 +6,12 @@ unset _OS_PARAMS
 
 keystone_unit=$(juju status keystone|grep -i workload -A1|tail -n1|awk '{print $1}'|tr -d '*')
 echo Keystone unit: ${keystone_unit}
-if ! curl -qs `juju run --unit ${keystone_unit} "unit-get private-address"`:5000/v3 | grep 404 ;
+if ! curl -qs `juju exec --unit ${keystone_unit} "unit-get private-address"`:5000/v3 | grep 404 ;
 then
 echo Using keystone v3 api
-export OS_AUTH_URL=${OS_AUTH_PROTOCOL:-http}://`juju run --unit ${keystone_unit} "unit-get private-address"`:5000/v3
+export OS_AUTH_URL=${OS_AUTH_PROTOCOL:-http}://`juju exec --unit ${keystone_unit} "unit-get private-address"`:5000/v3
 export OS_USERNAME=admin
-export OS_PASSWORD=`juju run --unit keystone/0 leader-get admin_passwd`
+export OS_PASSWORD=`juju exec --unit keystone/0 leader-get admin_passwd`
 export OS_DOMAIN_NAME=admin_domain
 export OS_USER_DOMAIN_NAME=admin_domain
 export OS_PROJECT_DOMAIN_NAME=admin_domain
@@ -23,9 +23,9 @@ export OS_AUTH_VERSION=3
 else
 echo Using keystone v2 api
 export OS_USERNAME=admin
-export OS_PASSWORD=`juju run --unit keystone/0 leader-get admin_passwd`
+export OS_PASSWORD=`juju exec --unit keystone/0 leader-get admin_passwd`
 export OS_TENANT_NAME=admin
 export OS_REGION_NAME=RegionOne
-export OS_AUTH_URL=${OS_AUTH_PROTOCOL:-http}://`juju run --unit ${keystone_unit} "unit-get private-address"`:5000/v2.0
+export OS_AUTH_URL=${OS_AUTH_PROTOCOL:-http}://`juju exec --unit ${keystone_unit} "unit-get private-address"`:5000/v2.0
 fi
 

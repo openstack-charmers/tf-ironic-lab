@@ -1,6 +1,6 @@
-variable "ubuntu_focal_img" {
+variable "ubuntu_jammy_img" {
   type = string
-  default = "https://cloud-images.ubuntu.com/focal/current/focal-server-cloudimg-amd64.img"
+  default = "https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img"
 }
 
 variable "num_maas_nodes" {
@@ -36,13 +36,13 @@ variable "maas_nodes_rootfs_size" {
 variable "maas_nodes_vcpu" {
   description = "MAAS nodes number of vcpus"
   type = number
-  default = 2
+  default = 6
 }
 
 variable "maas_nodes_mem" {
   description = "MAAS nodes memory"
   type = string
-  default = "8192"
+  default = "24576"
 }
 
 terraform {
@@ -94,17 +94,17 @@ resource "libvirt_network" "external_network" {
   dhcp { enabled = true }
 }
 # Defining VM Volume
-resource "libvirt_volume" "ubuntu_focal" {
-  name = "ubuntu-focal.qcow2"
+resource "libvirt_volume" "ubuntu_jammy" {
+  name = "ubuntu-jammy.qcow2"
   pool = "default"
-  source = var.ubuntu_focal_img
+  source = var.ubuntu_jammy_img
   format = "qcow2"
 }
 resource "libvirt_volume" "maas_controller_rootfs" {
   name = "maas-controller.qcow2"
   pool = "default"
   format = "qcow2"
-  base_volume_id = libvirt_volume.ubuntu_focal.id
+  base_volume_id = libvirt_volume.ubuntu_jammy.id
   size = 21474836480  # 20GiB
 }
 
@@ -216,9 +216,9 @@ resource "libvirt_domain" "maas_controller" {
       "echo block until there is a ipxe.cfg available",
       "until wget -O - http://10.0.0.2:5248/ipxe.cfg; do sleep 5;done",
       "echo wait for images to be fully unpacked",
-      # 20.04 is used for commissioning, if a different image is used, then change the URL accordingly
-      "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-20.04/focal/stable/boot-initrd; do sleep 5;done",
-      "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-20.04/focal/stable/boot-kernel; do sleep 5;done",
+      # 22.04 is used for commissioning, if a different image is used, then change the URL accordingly
+      "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-22.04/jammy/stable/boot-initrd; do sleep 5;done",
+      "until wget -O /dev/null http://10.0.0.2:5248/images/ubuntu/amd64/ga-22.04/jammy/stable/boot-kernel; do sleep 5;done",
     ]
   }
 
@@ -496,8 +496,8 @@ juju add-model ironic
 juju add-space ironic 10.10.0.0/24
 juju add-space main 10.0.0.0/24
 juju deploy ./ironic-bundle.yaml
-juju wait -x ironic-conductor
-juju run-action ironic-conductor/leader set-temp-url-secret --wait
+juju wait-for application ironic-conductor --query='name=="ironic-conductor" && (status=="blocked" || status=="active")' --timeout=90m
+juju run ironic-conductor/leader set-temp-url-secret --wait=2m
 EOF
     when = create
   }
@@ -594,6 +594,9 @@ openstack subnet create \
      deployment
 
 openstack router add subnet ironic-router deployment
+
+deployment_net=$(openstack network show -c id -f value deployment)
+juju config ironic-conductor cleaning-network=$deployment_net provisioning-network=$deployment_net
 EOF
   }
 }
@@ -616,7 +619,7 @@ if [[ ! -f baremetal-ubuntu-focal.img ]]; then
     wget http://10.245.161.162/swift/v1/images/baremetal-ubuntu-focal.img
 fi
 
-for release in bionic focal
+for release in bionic focal jammy
 do
     glance image-create \
         --store swift \

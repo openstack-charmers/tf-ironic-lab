@@ -1,5 +1,5 @@
 variables:
-  openstack-origin: &openstack-origin distro
+  openstack-origin: &openstack-origin cloud:jammy-bobcat
   data-port: &data-port br-ex:ens4 br-deployment:ens5
   worker-multiplier: &worker-multiplier 0.25
   osd-devices: &osd-devices /dev/sdb /dev/vdb
@@ -7,9 +7,10 @@ variables:
   expected-mon-count: &expected-mon-count 3
   oam-space: &oam-space main
   data-space: &data-space data
-  openstack-channel: &openstack-channel ussuri/edge
-  ceph-channel: &ceph-channel octopus/edge
-  series: &series focal
+  openstack-channel: &openstack-channel latest/edge
+  ceph-channel: &ceph-channel latest/edge
+  ovn-channel: &ovn-channel 23.09/candidate
+  series: &series jammy
 
 machines:
   "1":
@@ -27,9 +28,9 @@ relations:
   - ironic-api
 - - neutron-ironic-agent:identity-credentials
   - keystone
-- - neutron-ironic-agent
+- - neutron-api-plugin-ovn
   - neutron-api
-- - neutron-openvswitch
+- - neutron-ironic-agent
   - neutron-api
 - - ironic-api:amqp
   - rabbitmq-server:amqp
@@ -55,8 +56,6 @@ relations:
   - keystone
 - - nova-ironic
   - nova-cloud-controller
-- - neutron-gateway:amqp
-  - rabbitmq-server:amqp
 - - keystone:shared-db
   - keystone-mysql-router:shared-db
 - - keystone-mysql-router:db-router
@@ -73,8 +72,18 @@ relations:
   - mysql-innodb-cluster:db-router
 - - neutron-api:amqp
   - rabbitmq-server:amqp
-- - neutron-gateway:neutron-plugin-api
-  - neutron-api:neutron-plugin-api
+- - ovn-central:certificates
+  - vault:certificates
+- - ovn-central:ovsdb-cms
+  - neutron-api-plugin-ovn:ovsdb-cms
+- - ovn-chassis:nova-compute
+  - nova-ironic:neutron-plugin
+- - ovn-chassis:certificates
+  - vault:certificates
+- - ovn-chassis:ovsdb
+  - ovn-central:ovsdb
+- - neutron-api-plugin-ovn:certificates
+  - vault:certificates
 - - glance:shared-db
   - glance-mysql-router:shared-db
 - - glance-mysql-router:db-router
@@ -85,8 +94,6 @@ relations:
   - glance:image-service
 - - nova-cloud-controller:amqp
   - rabbitmq-server:amqp
-- - nova-cloud-controller:quantum-network-service
-  - neutron-gateway:quantum-network-service
 - - openstack-dashboard:identity-service
   - keystone:identity-service
 - - openstack-dashboard:shared-db
@@ -111,10 +118,6 @@ relations:
   - cinder-mysql-router:shared-db
 - - cinder-mysql-router:db-router
   - mysql-innodb-cluster:db-router
-- - ntp:juju-info
-  - neutron-gateway
-- - ntp:juju-info
-  - neutron-gateway:juju-info
 - - placement
   - placement-mysql-router:shared-db
 - - placement-mysql-router:db-router
@@ -300,26 +303,33 @@ applications:
       worker-multiplier: *worker-multiplier
     to:
       - "lxd:4"
-  neutron-gateway:
-    annotations:
-      gui-x: '0'
-      gui-y: '0'
-    charm: ch:neutron-gateway
+  neutron-api-plugin-ovn:
+    charm: ch:neutron-api-plugin-ovn
     channel: *openstack-channel
+    num_units: 0
+  ovn-central:
+    charm: ch:ovn-central
+    channel: *ovn-channel
     comment: SET data-port to match your environment
-    num_units: 1
+    num_units: 3
+    options:
+      ovn-source: *openstack-origin
+      source: *openstack-origin
     bindings:
       "": *oam-space
-    #  data: *data-space
-    options:
-      bridge-mappings: physnet1:br-ex physnet2:br-deployment
-      data-port: *data-port
-      openstack-origin: *openstack-origin
-      enable-isolated-metadata: true
-      enable-metadata-network: true
-      worker-multiplier: *worker-multiplier
     to:
-      - 1
+      - "lxd:1"
+      - "lxd:2"
+      - "lxd:3"
+  ovn-chassis:
+    charm: ch:ovn-chassis
+    channel: *ovn-channel
+    num_units: 0
+    options:
+      ovn-bridge-mappings: physnet1:br-ex physnet2:br-deployment
+      bridge-interface-mappings: *data-port
+      prefer-chassis-as-gw: true
+      ovn-source: *openstack-origin
   nova-cloud-controller:
     annotations:
       gui-x: '0'
@@ -347,7 +357,7 @@ applications:
       openstack-origin: *openstack-origin
       virt-type: ironic
     to:
-      - "lxd:3"
+      - 1
   ntp:
     annotations:
       gui-x: '1000'
@@ -416,16 +426,18 @@ applications:
       "": *oam-space
     to:
       - "lxd:2"
-  neutron-openvswitch:
-    charm: ch:neutron-openvswitch
-    channel: *openstack-channel
-    num_units: 0
-    options:
-      bridge-mappings: physnet1:br-ex physnet2:br-deployment
-      data-port: *data-port
   neutron-ironic-agent:
     charm: ch:neutron-api-plugin-ironic
     channel: *openstack-channel
     num_units: 0
     options:
       openstack-origin: *openstack-origin
+  vault:
+    charm: ch:vault
+    channel: latest/edge
+    num_units: 1
+    options:
+      auto-generate-root-ca-cert: true
+      totally-unsecure-auto-unlock: true
+    to:
+      - "lxd:1"
