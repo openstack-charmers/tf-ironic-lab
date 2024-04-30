@@ -1,0 +1,7 @@
+.terraform
+.terraform.lock.hcl
+terraform.tfstate
+terraform.tfstate.backup
+cloud-and-creds.sh
+*.img
+ironic-python-agent.*
