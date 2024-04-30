@@ -36,13 +36,13 @@ variable "maas_nodes_rootfs_size" {
 variable "maas_nodes_vcpu" {
   description = "MAAS nodes number of vcpus"
   type = number
-  default = 2
+  default = 6
 }
 
 variable "maas_nodes_mem" {
   description = "MAAS nodes memory"
   type = string
-  default = "8192"
+  default = "24576"
 }
 
 terraform {
