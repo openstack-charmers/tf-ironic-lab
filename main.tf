@@ -496,8 +496,8 @@ juju add-model ironic
 juju add-space ironic 10.10.0.0/24
 juju add-space main 10.0.0.0/24
 juju deploy ./ironic-bundle.yaml
-juju wait -x ironic-conductor
-juju run-action ironic-conductor/leader set-temp-url-secret --wait
+juju wait-for application ironic-conductor --query='name=="ironic-conductor" && (status=="blocked" || status=="active")' --timeout=90m
+juju run ironic-conductor/leader set-temp-url-secret --wait=2m
 EOF
     when = create
   }
@@ -594,6 +594,9 @@ openstack subnet create \
      deployment
 
 openstack router add subnet ironic-router deployment
+
+deployment_net=$(openstack network show -c id -f value deployment)
+juju config ironic-conductor cleaning-network=$deployment_net provisioning-network=$deployment_net
 EOF
   }
 }
